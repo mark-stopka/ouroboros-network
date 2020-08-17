@@ -24,9 +24,8 @@ module Ouroboros.Consensus.Network.NodeToNode (
   , App
   , Apps (..)
   , mkApps
-    -- ** Projections
-  , initiator
-  , responder
+    -- ** 'OuroborosBundle'
+  , initiatorAndResponder
     -- * Re-exports
   , ChainSyncTimeout (..)
   ) where
@@ -39,7 +38,6 @@ import           Control.Monad.Class.MonadTimer (MonadTimer)
 import           Control.Tracer
 import           Data.ByteString.Lazy (ByteString)
 import           Data.Map.Strict (Map)
-import           Data.Void (Void)
 
 import           Ouroboros.Network.AnchoredFragment (AnchoredFragment (..))
 import           Ouroboros.Network.Block (Serialised (..), decodePoint,
@@ -581,18 +579,17 @@ mkApps kernel Tracers {..} Codecs {..} genChainSyncTimeout Handlers {..} =
   Projections from 'Apps'
 -------------------------------------------------------------------------------}
 
--- | A projection from 'NetworkApplication' to a client-side
--- 'OuroborosApplication' for the node-to-node protocols.
+-- | A bi-directional network applicaiton.
 --
 -- Implementation note: network currently doesn't enable protocols conditional
 -- on the protocol version, but it eventually may; this is why @_version@ is
 -- currently unused.
-initiator
+initiatorAndResponder
   :: MiniProtocolParameters
   -> NodeToNodeVersion
   -> Apps m (ConnectionId peer) b b b b a
-  -> OuroborosApplication 'InitiatorMode peer b m a Void
-initiator miniProtocolParameters version Apps {..} =
+  -> OuroborosBundle 'InitiatorResponderMode peer b m a a
+initiatorAndResponder miniProtocolParameters version Apps {..} =
     nodeToNodeProtocols
       miniProtocolParameters
       -- TODO: currently consensus is using 'ConnectionId' for its 'peer' type.
@@ -603,36 +600,20 @@ initiator miniProtocolParameters version Apps {..} =
       -- a quadruple uniquely determinaing a connection).
       (\them controlMessageSTM -> NodeToNodeProtocols {
           chainSyncProtocol =
-            (InitiatorProtocolOnly (MuxPeerRaw (aChainSyncClient version controlMessageSTM them))),
+            (InitiatorAndResponderProtocol
+              (MuxPeerRaw (aChainSyncClient version controlMessageSTM them))
+              (MuxPeerRaw (aChainSyncServer version controlMessageSTM them))),
           blockFetchProtocol =
-            (InitiatorProtocolOnly (MuxPeerRaw (aBlockFetchClient version controlMessageSTM them))),
+            (InitiatorAndResponderProtocol
+              (MuxPeerRaw (aBlockFetchClient version controlMessageSTM them))
+              (MuxPeerRaw (aBlockFetchServer version controlMessageSTM them))),
           txSubmissionProtocol =
-            (InitiatorProtocolOnly (MuxPeerRaw (aTxSubmissionClient version controlMessageSTM them))),
+            (InitiatorAndResponderProtocol
+              (MuxPeerRaw (aTxSubmissionClient version controlMessageSTM them))
+              (MuxPeerRaw (aTxSubmissionServer version controlMessageSTM them))),
           keepAliveProtocol =
-            (InitiatorProtocolOnly (MuxPeerRaw (aKeepAliveClient version controlMessageSTM them)))
-        })
-      version
-
--- | A projection from 'NetworkApplication' to a server-side
--- 'OuroborosApplication' for the node-to-node protocols.
---
--- See 'initiatorNetworkApplication' for rationale for the @_version@ arg.
-responder
-  :: MiniProtocolParameters
-  -> NodeToNodeVersion
-  -> Apps m (ConnectionId peer) b b b b a
-  -> OuroborosApplication 'ResponderMode peer b m Void a
-responder miniProtocolParameters version Apps {..} =
-    nodeToNodeProtocols
-      miniProtocolParameters
-      (\them controlMessageSTM -> NodeToNodeProtocols {
-          chainSyncProtocol =
-            (ResponderProtocolOnly (MuxPeerRaw (aChainSyncServer version controlMessageSTM them))),
-          blockFetchProtocol =
-            (ResponderProtocolOnly (MuxPeerRaw (aBlockFetchServer version controlMessageSTM them))),
-          txSubmissionProtocol =
-            (ResponderProtocolOnly (MuxPeerRaw (aTxSubmissionServer version controlMessageSTM them))),
-          keepAliveProtocol =
-            (ResponderProtocolOnly (MuxPeerRaw (aKeepAliveServer version controlMessageSTM them)))
+            (InitiatorAndResponderProtocol
+              (MuxPeerRaw (aKeepAliveClient version controlMessageSTM them))
+              (MuxPeerRaw (aKeepAliveServer version controlMessageSTM them)))
         })
       version
