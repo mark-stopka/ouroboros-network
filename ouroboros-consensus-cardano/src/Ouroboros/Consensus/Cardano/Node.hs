@@ -300,6 +300,7 @@ instance CardanoHardForkConstraints c
       [ (NodeToNodeV_1, CardanoNodeToNodeVersion1)
       , (NodeToNodeV_2, CardanoNodeToNodeVersion2)
       , (NodeToNodeV_3, CardanoNodeToNodeVersion2)
+      , (NodeToNodeV_4, CardanoNodeToNodeVersion2)
       -- TODO #2670 enable these
       -- , (NodeToNodeV_4, CardanoNodeToNodeVersion3)
       -- , (NodeToNodeV_5, CardanoNodeToNodeVersion4)
