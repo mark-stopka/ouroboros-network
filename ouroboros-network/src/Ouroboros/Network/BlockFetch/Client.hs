@@ -28,6 +28,8 @@ import           Control.Exception (assert)
 import qualified Data.Set as Set
 
 import           Ouroboros.Network.Block
+import           Ouroboros.Network.Mux
+                   ( ControlMessageSTM, ControlMessage (..))
 
 import           Ouroboros.Network.NodeToNode.Version (NodeToNodeVersion)
 import           Ouroboros.Network.Protocol.BlockFetch.Type
@@ -73,14 +75,16 @@ type BlockFetchClient header block m a =
 -- | The implementation of the client side of block fetch protocol designed to
 -- work in conjunction with our fetch logic.
 --
-blockFetchClient :: forall header block m void.
+blockFetchClient :: forall header block m.
                     (MonadSTM m, MonadThrow m,
                      HasHeader header, HasHeader block,
                      HeaderHash header ~ HeaderHash block)
                  => NodeToNodeVersion
+                 -> ControlMessageSTM m
                  -> FetchClientContext header block m
-                 -> PeerPipelined (BlockFetch block) AsClient BFIdle m void
+                 -> PeerPipelined (BlockFetch block) AsClient BFIdle m ()
 blockFetchClient _version
+                 controlMessageSTM
                  FetchClientContext {
                    fetchClientCtxTracer    = tracer,
                    fetchClientCtxPolicy    = FetchClientPolicy {
@@ -95,7 +99,7 @@ blockFetchClient _version
     senderIdle :: forall n.
                   Nat n
                -> PeerSender (BlockFetch block) AsClient
-                             BFIdle n () m void
+                             BFIdle n () m ()
 
     -- We have no requests to send. Check if we have any pending pipelined
     -- results to collect. If so, go round and collect any more. If not, block
@@ -106,23 +110,31 @@ blockFetchClient _version
 
     -- And similarly if there are no pending pipelined results at all.
     senderIdle Zero = SenderEffect $ do
-      -- assert nothing in flight here
-      PeerFetchInFlight {
-          peerFetchReqsInFlight,
-          peerFetchBytesInFlight,
-          peerFetchBlocksInFlight
-        } <- atomically $ readTVar (fetchClientInFlightVar stateVars)
+      controlMessage <- atomically controlMessageSTM
+      case controlMessage of
+        Terminate ->
+          pure $ SenderYield (ClientAgency TokIdle)
+                             MsgClientDone
+                             (SenderDone TokDone ())
+        -- Continue
+        _ -> do
+          -- assert nothing in flight here
+          PeerFetchInFlight {
+              peerFetchReqsInFlight,
+              peerFetchBytesInFlight,
+              peerFetchBlocksInFlight
+            } <- atomically $ readTVar (fetchClientInFlightVar stateVars)
 
-      assert
-        ( peerFetchReqsInFlight  == 0 &&
-          peerFetchBytesInFlight == 0 &&
-          Set.null peerFetchBlocksInFlight )
-        $ pure (senderAwait Zero)
+          assert
+            ( peerFetchReqsInFlight  == 0 &&
+              peerFetchBytesInFlight == 0 &&
+              Set.null peerFetchBlocksInFlight )
+            $ pure (senderAwait Zero)
 
     senderAwait :: forall n.
                    Nat n
                 -> PeerSender (BlockFetch block) AsClient
-                              BFIdle n () m void
+                              BFIdle n () m ()
     senderAwait outstanding =
       SenderEffect $ do
       -- Atomically grab our next request and update our tracking state.
@@ -147,43 +159,52 @@ blockFetchClient _version
                  -> PeerFetchInFlightLimits
                  -> [AnchoredFragment header]
                  -> PeerSender (BlockFetch block) AsClient
-                               BFIdle n () m void
+                               BFIdle n () m ()
 
     -- We now do have some requests that we have accepted but have yet to
     -- actually send out. Lets send out the first one.
     senderActive outstanding gsvs inflightlimits (fragment:fragments) =
       SenderEffect $ do
+        controlMessage <- atomically controlMessageSTM
+        case (outstanding, controlMessage) of
+          (Zero, Terminate) ->
+            pure $ SenderYield (ClientAgency TokIdle)
+                               MsgClientDone
+                               (SenderDone TokDone ())
+
+          -- Continue or non zero outstanding requests
+          _ -> do
 {-
-        now <- getMonotonicTime
-        --TODO: should we pair this up with the senderAwait earlier?
-        inFlight  <- readTVar fetchClientInFlightVar
+            now <- getMonotonicTime
+            --TODO: should we pair this up with the senderAwait earlier?
+            inFlight  <- readTVar fetchClientInFlightVar
 
-        let blockTrailingEdges =
-              blockArrivalShedule
-                gsvs
-                inFlight
-                (map snd fragment)
+            let blockTrailingEdges =
+                  blockArrivalShedule
+                    gsvs
+                    inFlight
+                    (map snd fragment)
 
-        timeout <- newTimeout (head blockTrailingEdges)
-        fork $ do
-          fired <- awaitTimeout timeout
-          when fired $
-            atomically (writeTVar _ PeerFetchStatusAberrant)
+            timeout <- newTimeout (head blockTrailingEdges)
+            fork $ do
+              fired <- awaitTimeout timeout
+              when fired $
+                atomically (writeTVar _ PeerFetchStatusAberrant)
 -}
-        let range :: ChainRange header
-            !range = assert (not (AF.null fragment)) $
-                     ChainRange (blockPoint lower)
-                                (blockPoint upper)
-              where
-                Right lower = AF.last fragment
-                Right upper = AF.head fragment
+            let range :: ChainRange header
+                !range = assert (not (AF.null fragment)) $
+                         ChainRange (blockPoint lower)
+                                    (blockPoint upper)
+                  where
+                    Right lower = AF.last fragment
+                    Right upper = AF.head fragment
 
-        return $
-          SenderPipeline
-            (ClientAgency TokIdle)
-            (MsgRequestRange (castRange range))
-            (receiverBusy range fragment inflightlimits)
-            (senderActive (Succ outstanding) gsvs inflightlimits fragments)
+            return $
+              SenderPipeline
+                (ClientAgency TokIdle)
+                (MsgRequestRange (castRange range))
+                (receiverBusy range fragment inflightlimits)
+                (senderActive (Succ outstanding) gsvs inflightlimits fragments)
 
     -- And when we run out, go back to idle.
     senderActive outstanding _ _ [] = senderIdle outstanding

@@ -115,6 +115,7 @@ data Handlers m peer blk = Handlers {
     -- TODO block fetch client does not have GADT view of the handlers.
     , hBlockFetchClient
         :: NodeToNodeVersion
+        -> ControlMessageSTM m
         -> BlockFetchClient (Header blk) blk m ()
 
     , hBlockFetchServer
@@ -471,7 +472,7 @@ mkApps kernel Tracers {..} Codecs {..} genChainSyncTimeout Handlers {..} =
       -> remotePeer
       -> Channel m bBF
       -> m ((), Maybe bBF)
-    aBlockFetchClient version _controlMessageSTM them channel = do
+    aBlockFetchClient version controlMessageSTM them channel = do
       labelThisThread "BlockFetchClient"
       bracketFetchClient (getFetchClientRegistry kernel) them $ \clientCtx ->
         runPipelinedPeerWithLimits
@@ -480,7 +481,7 @@ mkApps kernel Tracers {..} Codecs {..} genChainSyncTimeout Handlers {..} =
           (byteLimitsBlockFetch (const 0)) -- TODO: Real Bytelimits, see #1727
           timeLimitsBlockFetch
           channel
-          $ hBlockFetchClient version clientCtx
+          $ hBlockFetchClient version controlMessageSTM clientCtx
 
     aBlockFetchServer
       :: NodeToNodeVersion

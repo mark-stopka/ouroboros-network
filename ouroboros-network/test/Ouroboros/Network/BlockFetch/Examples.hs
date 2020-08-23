@@ -44,6 +44,7 @@ import           Network.TypedProtocol.Pipelined
 import           Ouroboros.Network.Channel
 import           Ouroboros.Network.Driver
 import           Ouroboros.Network.DeltaQ
+import           Ouroboros.Network.Mux
 import           Ouroboros.Network.NodeToNode (NodeToNodeVersion (..))
 import           Ouroboros.Network.Protocol.BlockFetch.Codec
 import           Ouroboros.Network.Protocol.BlockFetch.Server
@@ -92,7 +93,7 @@ blockFetchExample1 decisionTracer clientStateTracer clientMsgTracer
                         (contramap (TraceLabelPeer peerno) clientMsgTracer)
                         (contramap (TraceLabelPeer peerno) serverMsgTracer)
                         registry peerno
-                        (blockFetchClient NodeToNodeV_1)
+                        (blockFetchClient NodeToNodeV_1 (continueForever (Proxy :: Proxy m)))
                         (mockBlockFetchServer1 (unanchorFragment candidateChain))
                     | (peerno, candidateChain) <- zip [1..] candidateChains
                     ]
