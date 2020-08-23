@@ -130,6 +130,7 @@ data Handlers m peer blk = Handlers {
 
     , hTxSubmissionServer
         :: NodeToNodeVersion
+        -> ControlMessageSTM m
         -> peer
         -> TxSubmissionServerPipelined (GenTxId blk) (GenTx blk) m ()
 
@@ -190,13 +191,14 @@ mkHandlers
             (txSubmissionMaxUnacked miniProtocolParameters)
             (getMempoolReader getMempool)
             version
-      , hTxSubmissionServer = \version peer ->
+      , hTxSubmissionServer = \version controlMessageSTM peer ->
           txSubmissionInbound
             (contramap (TraceLabelPeer peer) (Node.txInboundTracer tracers))
             (txSubmissionMaxUnacked miniProtocolParameters)
             (getMempoolReader getMempool)
             (getMempoolWriter getMempool)
             version
+            controlMessageSTM
       , hKeepAliveClient = \_version -> keepAliveClient (Node.keepAliveClientTracer tracers) keepAliveRng
       , hKeepAliveServer = \_version _peer -> keepAliveServer
       }
@@ -523,7 +525,7 @@ mkApps kernel Tracers {..} Codecs {..} genChainSyncTimeout Handlers {..} =
       -> remotePeer
       -> Channel m bTX
       -> m ((), Maybe bTX)
-    aTxSubmissionServer version _controlMessageSTM them channel = do
+    aTxSubmissionServer version controlMessageSTM them channel = do
       labelThisThread "TxSubmissionServer"
       runPipelinedPeerWithLimits
         (contramap (TraceLabelPeer them) tTxSubmissionTracer)
@@ -531,7 +533,7 @@ mkApps kernel Tracers {..} Codecs {..} genChainSyncTimeout Handlers {..} =
         (byteLimitsTxSubmission (const 0)) -- TODO: Real Bytelimits, see #1727
         timeLimitsTxSubmission
         channel
-        (txSubmissionServerPeerPipelined (hTxSubmissionServer version them))
+        (txSubmissionServerPeerPipelined (hTxSubmissionServer version controlMessageSTM them))
 
     aKeepAliveClient
       :: NodeToNodeVersion
