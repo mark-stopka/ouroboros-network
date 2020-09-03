@@ -23,6 +23,7 @@ import           GHC.Stack
 import qualified Ouroboros.Network.PeerSelection.KnownPeers as KnownPeers
 import           Ouroboros.Network.PeerSelection.KnownPeers (KnownPeers, KnownPeerInfo(..))
 import           Ouroboros.Network.PeerSelection.Types
+import qualified Debug.Trace as Debug
 
 
 -- | A peer pick policy is an action that picks a subset of elements from a
@@ -283,51 +284,79 @@ invariantPeerSelectionState PeerSelectionState{..} =
 
     -- The activePeers is a subset of the establishedPeers
     -- which is a subset of the known peers
- && Set.isSubsetOf activePeersSet establishedPeersSet
- && Set.isSubsetOf establishedPeersSet knownPeersSet
- && Map.keysSet establishedStatus == establishedPeersSet
+ && traceUnless
+      "activePeers not a subset of establishedPeersSet" 
+      (Set.isSubsetOf activePeersSet establishedPeersSet)
+ && traceUnless
+      "establishedPeerSet now a subset of knownPeersSet"
+      (Set.isSubsetOf establishedPeersSet knownPeersSet)
+ && traceUnless
+      "keys of esablishedStatus not equal establishedPeersSet"
+      (Map.keysSet establishedStatus == establishedPeersSet)
 
     -- The localRootPeers and publicRootPeers must not overlap.
- && Set.null (Set.intersection localRootPeersSet publicRootPeers)
+ && traceUnless
+      "null intersection of localRootPeersSet and publicRootPeers"
+      (Set.null (Set.intersection localRootPeersSet publicRootPeers))
 
     -- The localRootPeers are a subset of the knownPeers,
-    -- and with correct source and other info in the knownPeers.
- && Map.isSubmapOfBy (\rootPeerAdvertise
-                       KnownPeerInfo {knownPeerAdvertise, knownPeerSource} ->
-                           knownPeerSource == PeerSourceLocalRoot
-                        && knownPeerAdvertise == rootPeerAdvertise)
-                     localRootPeers
-                     (KnownPeers.toMap knownPeers)
-
-    -- The publicRootPeers are a subset of the knownPeers,
     -- and with correct source info in the knownPeers (either
     -- 'PeerSroucePublicRoot' or 'PeerSourceLocalRoot', as local and public
     -- root peers might overlap).
- && Map.isSubmapOfBy (\_ KnownPeerInfo {knownPeerSource} ->
-                         knownPeerSource == PeerSourcePublicRoot
-                      || knownPeerSource == PeerSourceLocalRoot)
-                     (Map.fromSet (const ()) publicRootPeers)
-                     (KnownPeers.toMap knownPeers)
+ && traceUnless
+      "localRootPeers not a subset of knownPeers"
+      (Map.isSubmapOfBy (\rootPeerAdvertise
+             KnownPeerInfo {knownPeerAdvertise, knownPeerSource} ->
+                 knownPeerSource == PeerSourceLocalRoot
+              && knownPeerAdvertise == rootPeerAdvertise)
+           localRootPeers
+           (KnownPeers.toMap knownPeers))
+
+    -- The publicRootPeers are a subset of the knownPeers,
+    -- and with correct source info in the knownPeers.
+ && traceUnless
+      "publicRootPeers not a subset of knownPeers"
+      (Map.isSubmapOfBy (\_ KnownPeerInfo {knownPeerSource} ->
+               knownPeerSource == PeerSourcePublicRoot
+            || knownPeerSource == PeerSourceLocalRoot)
+           (Map.fromSet (const ()) publicRootPeers)
+           (KnownPeers.toMap knownPeers))
 
     --TODO: all other peers have PeerSourceGossip, so no stale source info.
 
     -- We don't want to pick local root peers to forget, so it had better be
     -- the case that there's fewer of them than our target number.
- && Map.size localRootPeers <= targetNumberOfKnownPeers targets
+ && traceUnless
+      "localRootPeers exeedes targetNumberOfKnonwPeers "
+      (Map.size localRootPeers <= targetNumberOfKnownPeers targets)
 
     -- All currently established peers are in the availableToConnect set since
     -- the alternative is a record of failure, but these are not (yet) failed.
- && Set.isSubsetOf establishedPeersSet (KnownPeers.availableToConnect knownPeers)
+ && traceUnless
+      "establishedPeerSet now a subset of availableToConnect"
+      (Set.isSubsetOf establishedPeersSet (KnownPeers.availableToConnect knownPeers))
 
     -- No constraint for publicRootBackoffs, publicRootRetryTime
     -- or inProgressPublicRootsReq
 
- && inProgressGossipReqs >= 0
- && Set.isSubsetOf inProgressPromoteCold coldPeersSet
- && Set.isSubsetOf inProgressPromoteWarm warmPeersSet
- && Set.isSubsetOf inProgressDemoteWarm  warmPeersSet
- && Set.isSubsetOf inProgressDemoteHot   hotPeersSet
- && Set.null (Set.intersection inProgressPromoteWarm inProgressDemoteWarm)
+ && traceUnless
+      "negative inProgressGossipReqs"
+      (inProgressGossipReqs >= 0)
+ && traceUnless
+      "inProgressPromoteCold not a subset of coldPeersSet"
+      (Set.isSubsetOf inProgressPromoteCold coldPeersSet)
+ && traceUnless
+      "inProgressPromoteWarm not a subset of warmPeersSet"
+      (Set.isSubsetOf inProgressPromoteWarm warmPeersSet)
+ && traceUnless
+      "inProgressDemoteWarm not a subset of warmPeersSet"
+      (Set.isSubsetOf inProgressDemoteWarm  warmPeersSet)
+ && traceUnless
+      "inProgressDemoteHot not a subset of hotPeersSet"
+      (Set.isSubsetOf inProgressDemoteHot   hotPeersSet)
+ && traceUnless
+      "inProgressPromoteWarm intersects with inProgressDemoteWarm"
+      (Set.null (Set.intersection inProgressPromoteWarm inProgressDemoteWarm))
   where
     localRootPeersSet   = Map.keysSet localRootPeers
     knownPeersSet       = Map.keysSet (KnownPeers.toMap knownPeers)
@@ -446,3 +475,13 @@ data DebugPeerSelection peeraddr peerconn =
                           (Maybe DiffTime)
                           (PeerSelectionState peeraddr peerconn)
   deriving (Show, Functor)
+
+
+--
+--
+--
+
+traceUnless :: String -> Bool -> Bool
+traceUnless a False = Debug.trace a False
+traceUnless _ True  = True
+{-# NOINLINE traceUnless #-}
