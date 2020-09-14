@@ -163,7 +163,7 @@ data MiniProtocolState mode m = MiniProtocolState {
      }
 
 data MiniProtocolStatus = StatusIdle | StatusStartOnDemand | StatusRunning
-  deriving Eq
+  deriving (Eq, Show)
 
 data MuxSDUHeader = MuxSDUHeader {
       mhTimestamp :: !RemoteClockModel

@@ -109,6 +109,7 @@ import           Control.Monad (join)
 import           Control.Monad.Class.MonadAsync
 import           Control.Monad.Class.MonadThrow
 import           Control.Monad.Class.MonadTime (DiffTime)
+import           Control.Monad.Class.MonadTimer (MonadDelay, threadDelay)
 import           Control.Monad.Class.MonadSTM.Strict
 
 import           Control.Concurrent.JobPool (JobPool, Job (..))
@@ -243,6 +244,7 @@ data PeerState
   | DemotingToWarm
   | DemotingToCold  !PeerStatus
   -- ^ 'DemotingToCold' also contains the initial state of the peer.
+  deriving Eq
 
 
 -- | Return the current state of the peer, as it should be viewed by the
@@ -357,6 +359,7 @@ withPeerStateActions
        ( MonadAsync         m
        , MonadCatch         m
        , MonadMask          m
+       , MonadDelay         m
        , HasInitiator muxMode ~ True
        , Typeable versionNumber
        , Show     versionNumber
@@ -442,6 +445,8 @@ withPeerStateActions timeout
           -- A /hot/ protocol terminated, we deactivate the connection and keep
           -- monitoring /warm/ and /established/ protocols.
           WithSomeProtocolTemperature (WithHot MuxApplicationSuccess {}) -> do
+            traceWith spsTracer (PeerMsg "Hot mux returned")
+
             deactivatePeerConnection pch `catches` handlers
             peerMonitoringLoop pch
 
@@ -519,8 +524,8 @@ withPeerStateActions timeout
                                      (peerMonitoringLoop connHandle $> Nothing))
                                    Just
                                    ("peerMonitoringLoop " ++ show remoteAddress))
-              startProtocols TokWarm connHandle
-              startProtocols TokEstablished connHandle
+              startProtocols spsTracer TokWarm connHandle
+              startProtocols spsTracer TokEstablished connHandle
               atomically $ writeTVar peerStateVar (PeerStatus PeerWarm)
               traceWith spsTracer (PeerStatusChanged
                                     (ColdToWarm
@@ -576,6 +581,8 @@ withPeerStateActions timeout
       do
         -- quiesce warm peer protocols and set hot ones in 'Continue' mode.
         atomically $ do
+          status <- readTVar pchPeerState
+          --check (status == PeerStatus PeerWarm)
           writeTVar pchPeerState PromotingToHot
           writeTVar (getControlVar TokHot pchAppHandles) Continue
           writeTVar (getControlVar TokWarm pchAppHandles) Quiesce
@@ -583,7 +590,7 @@ withPeerStateActions timeout
           assert (e == Continue) $ pure ()
 
         -- start hot peer protocols
-        startProtocols TokHot connHandle
+        startProtocols spsTracer TokHot connHandle
         atomically $ writeTVar pchPeerState (PeerStatus PeerHot)
         traceWith spsTracer (PeerStatusChanged (WarmToHot pchConnectionId))
       `onException`
@@ -630,7 +637,11 @@ withPeerStateActions timeout
             throwM (peerSelectionActionExceptionToException err)
 
           Just MuxApplicationSuccess {} -> do
-            atomically $ writeTVar pchPeerState (PeerStatus PeerWarm)
+            threadDelay 10
+            atomically $ do
+                writeTVar pchPeerState (PeerStatus PeerWarm)
+                writeTVar (getAwaitVar TokHot pchAppHandles) retry
+            traceWith spsTracer (PeerMsg "XXX bork")
             traceWith spsTracer (PeerStatusChanged (HotToWarm pchConnectionId))
 
         `onException`
@@ -694,10 +705,11 @@ startProtocols :: forall (muxMode :: MuxMode) (pt :: ProtocolTemperature) peerAd
                   , MonadCatch m
                   , HasInitiator muxMode ~ True
                   )
-               => TokProtocolTemperature pt
+               => Tracer m (PeerSelectionActionsTrace peerAddr)
+               -> TokProtocolTemperature pt
                -> PeerConnectionHandle muxMode peerAddr ByteString m a b
                -> m ()
-startProtocols tok PeerConnectionHandle { pchMux, pchAppHandles } = do
+startProtocols spsTracer tok PeerConnectionHandle { pchMux, pchAppHandles } = do
     let ptcls = getProtocols tok pchAppHandles
     as <- traverse runInitiator ptcls
     atomically $ writeTVar (getAwaitVar tok pchAppHandles)
@@ -725,7 +737,9 @@ startProtocols tok PeerConnectionHandle { pchMux, pchAppHandles } = do
     runInitiator MiniProtocol {
                       miniProtocolNum,
                       miniProtocolRun
-                    } =
+                    } = do
+
+      traceWith spsTracer (PeerMsg $ "Starting protocol " ++ show miniProtocolNum)
       case miniProtocolRun of
         InitiatorProtocolOnly initiator ->
             Mux.runMiniProtocol
@@ -778,4 +792,5 @@ data PeerSelectionActionsTrace peerAddr =
     | PeerStatusChangeFailure !(PeerStatusChangeType peerAddr) !FailureType
     | PeerMonitoringError     !(ConnectionId peerAddr) !SomeException
     | PeerMonitoringResult    !(ConnectionId peerAddr) !(WithSomeProtocolTemperature MuxApplicationResult)
+    | PeerMsg                 !String -- Fix logging once and for all
   deriving Show

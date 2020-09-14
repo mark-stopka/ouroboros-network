@@ -525,7 +525,7 @@ runMiniProtocol Mux { muxMiniProtocols, muxControlCmdQueue , muxStatus}
       status <- readTVar miniProtocolStatusVar
       unless (status == StatusIdle) $
         error $ "runMiniProtocol: protocol thread already running for "
-             ++ show ptclNum ++ " " ++ show ptclDir'
+             ++ show ptclNum ++ " " ++ show ptclDir' ++ " status " ++ show status
       let !status' = case startMode of
                        StartOnDemand -> StatusStartOnDemand
                        StartEagerly  -> StatusRunning
