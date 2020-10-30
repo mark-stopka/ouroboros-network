@@ -32,6 +32,7 @@ import           Control.Monad.Class.MonadTime (DiffTime)
 import           Control.Tracer (Tracer)
 import           Data.Hashable
 import           Data.Typeable (Typeable)
+
 #if !defined(mingw32_HOST_OS)
 import           Network.Socket ( Family (AF_UNIX) )
 #endif
@@ -280,6 +281,7 @@ socketSnocket ioManager = Snocket {
           Socket.setSocketOption sd Socket.ReusePort 1
 #endif
           Socket.setSocketOption sd Socket.NoDelay 1
+          Socket.setSocketOption sd Socket.Linger 60
         when (fml == Socket.AF_INET6)
           -- An AF_INET6 socket can be used to talk to both IPv4 and IPv6 end points, and
           -- it is enabled by default on some systems. Disabled here since we run a separate
