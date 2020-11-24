@@ -1,4 +1,4 @@
-index-state: 2020-10-01T00:00:00Z
+index-state: 2020-11-15T00:00:00Z
 
 packages: ./typed-protocols
           ./typed-protocols-examples
@@ -152,8 +152,8 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/input-output-hk/cardano-ledger-specs
-  tag: 9ebcfedb3f93852fbeabfc8ce492ddb4d996b3b5
-  --sha256: 03n1m2030liv55b2jjjc7ga8w3fkbcxr6xpgsxa0gb9lhx41r4m5
+  tag: 261a62ee8c17c25076f0ea7f939df98f7b4b1e24
+  --sha256: 0mchsik12xzxm52hkwlr6dpymmpkpksk1vympxph07wf53ml3n4a
   subdir:
     byron/chain/executable-spec
     byron/crypto

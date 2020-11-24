@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE NamedFieldPuns           #-}
 {-# LANGUAGE ScopedTypeVariables      #-}
+{-# LANGUAGE TypeApplications         #-}
 {-# LANGUAGE TypeFamilies             #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 module Test.ThreadNet.TxGen.Shelley (
@@ -31,6 +32,7 @@ import           Test.ThreadNet.TxGen (TxGen (..))
 
 import qualified Test.Shelley.Spec.Ledger.Generator.Constants as Gen
 import qualified Test.Shelley.Spec.Ledger.Generator.Core as Gen
+import           Test.Shelley.Spec.Ledger.Generator.EraGen ()
 import qualified Test.Shelley.Spec.Ledger.Generator.Presets as Gen.Presets
 import qualified Test.Shelley.Spec.Ledger.Generator.Utxo as Gen
 
@@ -167,4 +169,4 @@ mkGenEnv whetherPPUs coreNodes = Gen.GenEnv keySpace constants
             ksGenesisDelegates,
             ksStakePools
           } =
-            Gen.Presets.keySpace constants
+            Gen.Presets.keySpace @(MockShelley h) constants
