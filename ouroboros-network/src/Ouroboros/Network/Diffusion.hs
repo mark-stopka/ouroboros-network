@@ -77,8 +77,11 @@ data DiffusionInitializationTracer
   | CreatedLocalSocket !FilePath
   | ConfiguringLocalSocket !FilePath !FileDescriptor
   | ListeningLocalSocket !FilePath !FileDescriptor
+  | LocalSocketUp  !FilePath !FileDescriptor
   | CreatingServerSocket !SockAddr
   | ConfiguringServerSocket !SockAddr
+  | ListeningServerSocket !SockAddr
+  | ServerSocketUp !SockAddr
   | UnsupportedLocalSystemdSocket !SockAddr
   | UnsupportedReadySocketCase
   | DiffusionErrored SomeException
@@ -372,6 +375,9 @@ runDataDiffusion tracers
 
                  Snocket.listen sn sd
 
+                 traceWith dtDiffusionInitializationTracer . LocalSocketUp path
+                    =<< localSocketFileDescriptor sd
+
           traceWith dtDiffusionInitializationTracer . RunLocalServer =<< Snocket.getLocalAddr sn sd
 
           void $ NodeToClient.withServer
@@ -405,7 +411,9 @@ runDataDiffusion tracers
                Right addr -> do
                  traceWith dtDiffusionInitializationTracer $ ConfiguringServerSocket addr
                  Snocket.bind sn sd addr
+                 traceWith dtDiffusionInitializationTracer $ ListeningServerSocket addr
                  Snocket.listen sn sd
+                 traceWith dtDiffusionInitializationTracer $ ServerSocketUp addr
                  return addr
 
           traceWith dtDiffusionInitializationTracer $ RunServer addr
